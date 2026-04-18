@@ -58,7 +58,7 @@ def upload_to_s3(file_path: str, s3_key: str, content_type: str, filename: str) 
 
 
 def send_to_telegram(chat_id: str, cdn_url: str, filename: str, title: str, is_audio: bool):
-    """Отправляет файл пользователю через Telegram Bot API."""
+    """Отправляет файл пользователю через Telegram Bot API. v3"""
     token = os.environ['TELEGRAM_BOT_TOKEN']
     base = f"https://api.telegram.org/bot{token}"
 
