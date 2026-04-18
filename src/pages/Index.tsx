@@ -6,7 +6,7 @@ type Step = "input" | "quality" | "subscribe" | "downloading";
 const CHANNELS = [
   { id: 1, name: "@optomkross", url: "https://t.me/optomkross", checked: false },
   { id: 2, name: "@kukuzhd2", url: "https://t.me/kukuzhd2", checked: false },
-  { id: 3, name: "Канал 3", url: "https://t.me/+fss9hWn6dwI1MDcy", checked: false },
+  { id: 3, name: "@xozilka", url: "https://t.me/+fss9hWn6dwI1MDcy", checked: false },
 ];
 
 const QUALITIES = [
