@@ -4,9 +4,9 @@ import Icon from "@/components/ui/icon";
 type Step = "input" | "quality" | "subscribe" | "downloading";
 
 const CHANNELS = [
-  { id: 1, name: "@tech_channel", url: "https://t.me/tech_channel", checked: false },
-  { id: 2, name: "@music_vibes", url: "https://t.me/music_vibes", checked: false },
-  { id: 3, name: "@daily_news", url: "https://t.me/daily_news", checked: false },
+  { id: 1, name: "@optomkross", url: "https://t.me/optomkross", checked: false },
+  { id: 2, name: "@kukuzhd2", url: "https://t.me/kukuzhd2", checked: false },
+  { id: 3, name: "Канал 3", url: "https://t.me/+fss9hWn6dwI1MDcy", checked: false },
 ];
 
 const QUALITIES = [
