@@ -1,7 +1,53 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Icon from "@/components/ui/icon";
 
-type Step = "input" | "quality" | "subscribe" | "downloading";
+declare global {
+  interface Window {
+    Telegram?: {
+      WebApp?: {
+        ready: () => void;
+        expand: () => void;
+        close: () => void;
+        colorScheme: "light" | "dark";
+        themeParams: {
+          bg_color?: string;
+          text_color?: string;
+          hint_color?: string;
+          button_color?: string;
+          button_text_color?: string;
+          secondary_bg_color?: string;
+        };
+        MainButton: {
+          text: string;
+          color: string;
+          textColor: string;
+          isVisible: boolean;
+          isActive: boolean;
+          show: () => void;
+          hide: () => void;
+          enable: () => void;
+          disable: () => void;
+          setText: (text: string) => void;
+          onClick: (cb: () => void) => void;
+          offClick: (cb: () => void) => void;
+          showProgress: (leaveActive?: boolean) => void;
+          hideProgress: () => void;
+        };
+        BackButton: {
+          isVisible: boolean;
+          show: () => void;
+          hide: () => void;
+          onClick: (cb: () => void) => void;
+          offClick: (cb: () => void) => void;
+        };
+        openTelegramLink: (url: string) => void;
+        openLink: (url: string) => void;
+      };
+    };
+  }
+}
+
+type Step = "input" | "quality" | "subscribe" | "downloading" | "done";
 
 const CHANNELS = [
   { id: 1, name: "@optomkross", url: "https://t.me/optomkross", checked: false },
@@ -17,14 +63,75 @@ const QUALITIES = [
   { label: "Только аудио", value: "audio", size: "~5 МБ" },
 ];
 
+const tg = () => window.Telegram?.WebApp;
+
 export default function Index() {
   const [step, setStep] = useState<Step>("input");
   const [url, setUrl] = useState("");
   const [selectedQuality, setSelectedQuality] = useState("1080p");
   const [channels, setChannels] = useState(CHANNELS);
   const [progress, setProgress] = useState(0);
+  const [downloadUrl, setDownloadUrl] = useState("");
 
   const allSubscribed = channels.every((c) => c.checked);
+  const isTg = !!tg();
+
+  useEffect(() => {
+    tg()?.ready();
+    tg()?.expand();
+  }, []);
+
+  useEffect(() => {
+    const app = tg();
+    if (!app) return;
+    const handleBack = () => {
+      if (step === "quality") setStep("input");
+      else if (step === "subscribe") setStep("quality");
+    };
+    if (step === "quality" || step === "subscribe") {
+      app.BackButton.show();
+      app.BackButton.onClick(handleBack);
+    } else {
+      app.BackButton.hide();
+    }
+    return () => {
+      app.BackButton.offClick(handleBack);
+    };
+  }, [step]);
+
+  useEffect(() => {
+    const app = tg();
+    if (!app) return;
+    const mb = app.MainButton;
+
+    if (step === "input") {
+      mb.setText("Продолжить");
+      if (url.trim()) { mb.show(); mb.enable(); } else { mb.hide(); }
+      const cb = () => handleUrlSubmit();
+      mb.onClick(cb);
+      return () => mb.offClick(cb);
+    }
+    if (step === "quality") {
+      mb.setText("Выбрать качество");
+      mb.show(); mb.enable();
+      const cb = () => handleQualitySubmit();
+      mb.onClick(cb);
+      return () => mb.offClick(cb);
+    }
+    if (step === "subscribe") {
+      if (allSubscribed) {
+        mb.setText("Скачать видео");
+        mb.show(); mb.enable();
+      } else {
+        mb.setText(`Подпишись (${channels.filter(c => c.checked).length}/${channels.length})`);
+        mb.show(); mb.disable();
+      }
+      const cb = () => { if (allSubscribed) handleDownload(); };
+      mb.onClick(cb);
+      return () => mb.offClick(cb);
+    }
+    mb.hide();
+  }, [step, url, allSubscribed, channels]);
 
   const handleUrlSubmit = () => {
     if (!url.trim()) return;
@@ -41,6 +148,14 @@ export default function Index() {
     );
   };
 
+  const handleOpenChannel = (url: string) => {
+    if (isTg) {
+      tg()?.openTelegramLink(url);
+    } else {
+      window.open(url, "_blank");
+    }
+  };
+
   const handleDownload = () => {
     if (!allSubscribed) return;
     setStep("downloading");
@@ -50,6 +165,7 @@ export default function Index() {
       if (p >= 100) {
         p = 100;
         clearInterval(interval);
+        setStep("done");
       }
       setProgress(Math.min(Math.round(p), 100));
     }, 300);
@@ -61,194 +177,258 @@ export default function Index() {
     setSelectedQuality("1080p");
     setChannels(CHANNELS);
     setProgress(0);
+    setDownloadUrl("");
   };
 
+  const theme = tg()?.themeParams;
+  const bgColor = theme?.bg_color || "#17212b";
+  const secondaryBg = theme?.secondary_bg_color || "#232e3c";
+  const textColor = theme?.text_color || "#ffffff";
+  const hintColor = theme?.hint_color || "#708499";
+  const btnColor = theme?.button_color || "#2b9fe8";
+  const btnTextColor = theme?.button_text_color || "#ffffff";
+
   return (
-    <div className="min-h-screen bg-[#0e0e0e] flex items-center justify-center p-4 font-rubik">
-      <div className="w-full max-w-sm">
+    <div
+      className="min-h-screen flex flex-col font-rubik"
+      style={{ backgroundColor: bgColor, color: textColor }}
+    >
+      <div className="flex-1 flex flex-col p-4 max-w-lg mx-auto w-full">
 
         {/* Header */}
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-[#ff3c3c]/10 border border-[#ff3c3c]/20 mb-4">
-            <Icon name="Download" size={24} className="text-[#ff3c3c]" />
+        <div className="text-center py-6">
+          <div
+            className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4"
+            style={{ backgroundColor: `${btnColor}20` }}
+          >
+            <Icon name="Youtube" size={30} style={{ color: btnColor }} />
           </div>
-          <h1 className="text-white text-xl font-semibold tracking-tight">YouTube Downloader</h1>
-          <p className="text-[#555] text-sm mt-1">Скачай любое видео бесплатно</p>
+          <h1 className="text-xl font-semibold">YouTube Downloader</h1>
+          <p className="text-sm mt-1" style={{ color: hintColor }}>
+            Скачай любое видео бесплатно
+          </p>
+        </div>
+
+        {/* Steps indicator */}
+        <div className="flex items-center justify-center gap-2 mb-6">
+          {(["input", "quality", "subscribe"] as Step[]).map((s, i) => {
+            const steps: Step[] = ["input", "quality", "subscribe", "downloading", "done"];
+            const currentIdx = steps.indexOf(step);
+            const thisIdx = steps.indexOf(s);
+            const active = currentIdx >= thisIdx;
+            return (
+              <div key={s} className="flex items-center gap-2">
+                <div
+                  className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold transition-all duration-300"
+                  style={{
+                    backgroundColor: active ? btnColor : secondaryBg,
+                    color: active ? btnTextColor : hintColor,
+                  }}
+                >
+                  {i + 1}
+                </div>
+                {i < 2 && (
+                  <div
+                    className="w-8 h-0.5 rounded-full transition-all duration-300"
+                    style={{ backgroundColor: currentIdx > thisIdx ? btnColor : secondaryBg }}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Step: Input URL */}
         {step === "input" && (
-          <div className="animate-fade-in">
-            <div className="bg-[#161616] border border-[#222] rounded-2xl p-6 space-y-4">
-              <label className="text-[#888] text-xs uppercase tracking-widest">Ссылка на видео</label>
+          <div className="animate-fade-in space-y-3">
+            <div className="rounded-2xl p-4 space-y-3" style={{ backgroundColor: secondaryBg }}>
+              <label className="text-xs font-medium" style={{ color: hintColor }}>
+                Ссылка на видео
+              </label>
               <input
                 type="url"
                 value={url}
+                autoFocus
                 onChange={(e) => setUrl(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleUrlSubmit()}
                 placeholder="https://youtube.com/watch?v=..."
-                className="w-full bg-[#0e0e0e] border border-[#2a2a2a] rounded-xl px-4 py-3 text-white text-sm placeholder:text-[#333] outline-none focus:border-[#ff3c3c]/50 transition-colors"
+                className="w-full rounded-xl px-4 py-3 text-sm outline-none transition-colors"
+                style={{
+                  backgroundColor: bgColor,
+                  color: textColor,
+                  border: `1px solid ${hintColor}30`,
+                }}
               />
+            </div>
+            {!isTg && (
               <button
                 onClick={handleUrlSubmit}
                 disabled={!url.trim()}
-                className="w-full bg-[#ff3c3c] hover:bg-[#e03030] disabled:bg-[#2a1a1a] disabled:text-[#555] text-white text-sm font-medium py-3 rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+                className="w-full py-3 rounded-xl text-sm font-semibold transition-all duration-200 active:scale-[0.98]"
+                style={{
+                  backgroundColor: url.trim() ? btnColor : secondaryBg,
+                  color: url.trim() ? btnTextColor : hintColor,
+                }}
               >
                 Продолжить
               </button>
-            </div>
+            )}
           </div>
         )}
 
         {/* Step: Quality */}
         {step === "quality" && (
-          <div className="animate-fade-in">
-            <div className="bg-[#161616] border border-[#222] rounded-2xl p-6 space-y-4">
-              <div className="flex items-center gap-2 mb-2">
-                <button onClick={() => setStep("input")} className="text-[#555] hover:text-white transition-colors">
-                  <Icon name="ArrowLeft" size={16} />
+          <div className="animate-fade-in space-y-3">
+            <p className="text-xs font-medium px-1" style={{ color: hintColor }}>Выберите качество</p>
+            <div className="rounded-2xl overflow-hidden" style={{ backgroundColor: secondaryBg }}>
+              {QUALITIES.map((q, idx) => (
+                <button
+                  key={q.value}
+                  onClick={() => setSelectedQuality(q.value)}
+                  className="w-full flex items-center justify-between px-4 py-3.5 transition-all duration-150"
+                  style={{
+                    borderBottom: idx < QUALITIES.length - 1 ? `1px solid ${hintColor}15` : "none",
+                    backgroundColor: selectedQuality === q.value ? `${btnColor}20` : "transparent",
+                  }}
+                >
+                  <span className="text-sm font-medium" style={{ color: textColor }}>{q.label}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs" style={{ color: hintColor }}>{q.size}</span>
+                    {selectedQuality === q.value && (
+                      <Icon name="Check" size={16} style={{ color: btnColor }} />
+                    )}
+                  </div>
                 </button>
-                <label className="text-[#888] text-xs uppercase tracking-widest">Качество видео</label>
-              </div>
-
-              <div className="space-y-2">
-                {QUALITIES.map((q) => (
-                  <button
-                    key={q.value}
-                    onClick={() => setSelectedQuality(q.value)}
-                    className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all duration-150 ${
-                      selectedQuality === q.value
-                        ? "border-[#ff3c3c]/60 bg-[#ff3c3c]/10 text-white"
-                        : "border-[#222] bg-[#0e0e0e] text-[#888] hover:border-[#333] hover:text-white"
-                    }`}
-                  >
-                    <span className="text-sm font-medium">{q.label}</span>
-                    <span className="text-xs text-[#444]">{q.size}</span>
-                  </button>
-                ))}
-              </div>
-
+              ))}
+            </div>
+            {!isTg && (
               <button
                 onClick={handleQualitySubmit}
-                className="w-full bg-[#ff3c3c] hover:bg-[#e03030] text-white text-sm font-medium py-3 rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+                className="w-full py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                style={{ backgroundColor: btnColor, color: btnTextColor }}
               >
                 Далее
               </button>
-            </div>
+            )}
           </div>
         )}
 
         {/* Step: Subscribe */}
         {step === "subscribe" && (
-          <div className="animate-fade-in">
-            <div className="bg-[#161616] border border-[#222] rounded-2xl p-6 space-y-4">
-              <div className="flex items-center gap-2 mb-2">
-                <button onClick={() => setStep("quality")} className="text-[#555] hover:text-white transition-colors">
-                  <Icon name="ArrowLeft" size={16} />
-                </button>
-                <label className="text-[#888] text-xs uppercase tracking-widest">Подпишись для доступа</label>
-              </div>
-
-              <p className="text-[#555] text-xs">Подпишись на каналы, чтобы скачать видео</p>
-
+          <div className="animate-fade-in space-y-3">
+            <div className="rounded-2xl p-4" style={{ backgroundColor: secondaryBg }}>
+              <p className="text-sm font-medium mb-1">Подпишись на каналы</p>
+              <p className="text-xs mb-4" style={{ color: hintColor }}>
+                Подпишись на все каналы, чтобы получить доступ к скачиванию
+              </p>
               <div className="space-y-2">
                 {channels.map((channel) => (
                   <div
                     key={channel.id}
-                    className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-all duration-150 ${
-                      channel.checked
-                        ? "border-[#2a8a2a]/50 bg-[#1a2e1a]"
-                        : "border-[#222] bg-[#0e0e0e]"
-                    }`}
+                    className="flex items-center justify-between rounded-xl px-3 py-3 transition-all duration-150"
+                    style={{
+                      backgroundColor: channel.checked ? `${btnColor}15` : bgColor,
+                      border: `1px solid ${channel.checked ? btnColor + "40" : hintColor + "20"}`,
+                    }}
                   >
-                    <a
-                      href={channel.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-[#4a9eff] hover:text-[#6bb3ff] transition-colors"
+                    <button
+                      onClick={() => handleOpenChannel(channel.url)}
+                      className="text-sm font-medium text-left"
+                      style={{ color: btnColor }}
                     >
                       {channel.name}
-                    </a>
+                    </button>
                     <button
                       onClick={() => handleChannelCheck(channel.id)}
-                      className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-200 ${
-                        channel.checked
-                          ? "border-[#4caf50] bg-[#4caf50]"
-                          : "border-[#333] hover:border-[#555]"
-                      }`}
+                      className="w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 flex-shrink-0"
+                      style={{
+                        backgroundColor: channel.checked ? btnColor : "transparent",
+                        border: `2px solid ${channel.checked ? btnColor : hintColor + "50"}`,
+                      }}
                     >
-                      {channel.checked && <Icon name="Check" size={12} className="text-white" />}
+                      {channel.checked && <Icon name="Check" size={13} style={{ color: btnTextColor }} />}
                     </button>
                   </div>
                 ))}
               </div>
-
+            </div>
+            {!isTg && (
               <button
                 onClick={handleDownload}
                 disabled={!allSubscribed}
-                className="w-full bg-[#ff3c3c] hover:bg-[#e03030] disabled:bg-[#1e1414] disabled:text-[#444] text-white text-sm font-medium py-3 rounded-xl transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+                className="w-full py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                style={{
+                  backgroundColor: allSubscribed ? btnColor : secondaryBg,
+                  color: allSubscribed ? btnTextColor : hintColor,
+                }}
               >
                 {allSubscribed
                   ? "Скачать видео"
                   : `Подпишись (${channels.filter((c) => c.checked).length}/${channels.length})`}
               </button>
-            </div>
+            )}
           </div>
         )}
 
         {/* Step: Downloading */}
         {step === "downloading" && (
           <div className="animate-fade-in">
-            <div className="bg-[#161616] border border-[#222] rounded-2xl p-6 space-y-5 text-center">
-              {progress < 100 ? (
-                <>
-                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-[#ff3c3c]/10 border border-[#ff3c3c]/20">
-                    <Icon name="Loader" size={20} className="text-[#ff3c3c] animate-spin" />
-                  </div>
-                  <div>
-                    <p className="text-white text-sm font-medium">Подготавливаем файл...</p>
-                    <p className="text-[#444] text-xs mt-1">{selectedQuality} · {progress}%</p>
-                  </div>
-                  <div className="h-1 bg-[#222] rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-[#ff3c3c] rounded-full transition-all duration-300"
-                      style={{ width: `${progress}%` }}
-                    />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-[#1a3a1a] border border-[#2a8a2a]/40">
-                    <Icon name="CheckCircle" size={20} className="text-[#4caf50]" />
-                  </div>
-                  <div>
-                    <p className="text-white text-sm font-medium">Готово!</p>
-                    <p className="text-[#444] text-xs mt-1">Файл будет отправлен в чат</p>
-                  </div>
-                  <button
-                    onClick={handleReset}
-                    className="w-full bg-[#1a1a1a] hover:bg-[#222] border border-[#2a2a2a] text-[#888] hover:text-white text-sm py-3 rounded-xl transition-all duration-200"
-                  >
-                    Скачать ещё
-                  </button>
-                </>
-              )}
+            <div className="rounded-2xl p-6 text-center space-y-4" style={{ backgroundColor: secondaryBg }}>
+              <div
+                className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mx-auto"
+                style={{ backgroundColor: `${btnColor}20` }}
+              >
+                <Icon name="Loader" size={24} className="animate-spin" style={{ color: btnColor }} />
+              </div>
+              <div>
+                <p className="font-medium">Подготавливаем файл...</p>
+                <p className="text-sm mt-1" style={{ color: hintColor }}>{selectedQuality} · {progress}%</p>
+              </div>
+              <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: bgColor }}>
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{ width: `${progress}%`, backgroundColor: btnColor }}
+                />
+              </div>
             </div>
           </div>
         )}
 
-        {/* Steps indicator */}
-        <div className="flex items-center justify-center gap-2 mt-8">
-          {(["input", "quality", "subscribe", "downloading"] as Step[]).map((s) => (
-            <div
-              key={s}
-              className={`h-1 rounded-full transition-all duration-300 ${
-                s === step ? "w-6 bg-[#ff3c3c]" : "w-2 bg-[#222]"
-              }`}
-            />
-          ))}
-        </div>
-
+        {/* Step: Done */}
+        {step === "done" && (
+          <div className="animate-fade-in">
+            <div className="rounded-2xl p-6 text-center space-y-4" style={{ backgroundColor: secondaryBg }}>
+              <div
+                className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mx-auto"
+                style={{ backgroundColor: `${btnColor}20` }}
+              >
+                <Icon name="CheckCircle" size={24} style={{ color: btnColor }} />
+              </div>
+              <div>
+                <p className="font-semibold text-lg">Готово!</p>
+                <p className="text-sm mt-1" style={{ color: hintColor }}>
+                  Файл будет отправлен в чат с ботом
+                </p>
+              </div>
+              {downloadUrl && (
+                <a
+                  href={downloadUrl}
+                  className="block w-full py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
+                  style={{ backgroundColor: btnColor, color: btnTextColor }}
+                >
+                  Скачать файл
+                </a>
+              )}
+              <button
+                onClick={handleReset}
+                className="w-full py-3 rounded-xl text-sm font-medium transition-all active:scale-[0.98]"
+                style={{ backgroundColor: bgColor, color: hintColor }}
+              >
+                Скачать ещё
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
