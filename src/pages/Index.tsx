@@ -17,6 +17,9 @@ declare global {
           button_text_color?: string;
           secondary_bg_color?: string;
         };
+        initDataUnsafe?: {
+          user?: { id: number; first_name?: string };
+        };
         MainButton: {
           text: string;
           color: string;
@@ -47,7 +50,7 @@ declare global {
   }
 }
 
-type Step = "input" | "quality" | "subscribe" | "downloading" | "done";
+type Step = "input" | "quality" | "subscribe" | "downloading" | "done" | "error";
 
 const CHANNELS = [
   { id: 1, name: "@optomkross", url: "https://t.me/optomkross", checked: false },
@@ -63,6 +66,8 @@ const QUALITIES = [
   { label: "Только аудио", value: "audio", size: "~5 МБ" },
 ];
 
+const BACKEND_URL = import.meta.env.VITE_YT_DOWNLOAD_URL || "";
+
 const tg = () => window.Telegram?.WebApp;
 
 export default function Index() {
@@ -71,10 +76,11 @@ export default function Index() {
   const [selectedQuality, setSelectedQuality] = useState("1080p");
   const [channels, setChannels] = useState(CHANNELS);
   const [progress, setProgress] = useState(0);
-  const [downloadUrl, setDownloadUrl] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
 
   const allSubscribed = channels.every((c) => c.checked);
   const isTg = !!tg();
+  const chatId = String(tg()?.initDataUnsafe?.user?.id || "");
 
   useEffect(() => {
     tg()?.ready();
@@ -148,27 +154,49 @@ export default function Index() {
     );
   };
 
-  const handleOpenChannel = (url: string) => {
+  const handleOpenChannel = (channelUrl: string) => {
     if (isTg) {
-      tg()?.openTelegramLink(url);
+      tg()?.openTelegramLink(channelUrl);
     } else {
-      window.open(url, "_blank");
+      window.open(channelUrl, "_blank");
     }
   };
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (!allSubscribed) return;
     setStep("downloading");
-    let p = 0;
-    const interval = setInterval(() => {
-      p += Math.random() * 15;
-      if (p >= 100) {
-        p = 100;
-        clearInterval(interval);
-        setStep("done");
+    setProgress(10);
+
+    let fakeInterval: ReturnType<typeof setInterval> | null = setInterval(() => {
+      setProgress((p) => {
+        if (p >= 85) { clearInterval(fakeInterval!); fakeInterval = null; return 85; }
+        return Math.min(p + Math.random() * 8, 85);
+      });
+    }, 600);
+
+    try {
+      const res = await fetch(BACKEND_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, quality: selectedQuality, chat_id: chatId || "test" }),
+      });
+
+      if (fakeInterval) { clearInterval(fakeInterval); fakeInterval = null; }
+      setProgress(100);
+
+      if (!res.ok) {
+        const data = await res.json();
+        setErrorMsg(data.error || "Произошла ошибка");
+        setStep("error");
+        return;
       }
-      setProgress(Math.min(Math.round(p), 100));
-    }, 300);
+
+      setStep("done");
+    } catch {
+      if (fakeInterval) { clearInterval(fakeInterval); fakeInterval = null; }
+      setErrorMsg("Не удалось связаться с сервером. Попробуй позже.");
+      setStep("error");
+    }
   };
 
   const handleReset = () => {
@@ -177,7 +205,7 @@ export default function Index() {
     setSelectedQuality("1080p");
     setChannels(CHANNELS);
     setProgress(0);
-    setDownloadUrl("");
+    setErrorMsg("");
   };
 
   const theme = tg()?.themeParams;
@@ -210,33 +238,35 @@ export default function Index() {
         </div>
 
         {/* Steps indicator */}
-        <div className="flex items-center justify-center gap-2 mb-6">
-          {(["input", "quality", "subscribe"] as Step[]).map((s, i) => {
-            const steps: Step[] = ["input", "quality", "subscribe", "downloading", "done"];
-            const currentIdx = steps.indexOf(step);
-            const thisIdx = steps.indexOf(s);
-            const active = currentIdx >= thisIdx;
-            return (
-              <div key={s} className="flex items-center gap-2">
-                <div
-                  className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold transition-all duration-300"
-                  style={{
-                    backgroundColor: active ? btnColor : secondaryBg,
-                    color: active ? btnTextColor : hintColor,
-                  }}
-                >
-                  {i + 1}
-                </div>
-                {i < 2 && (
+        {!["downloading", "done", "error"].includes(step) && (
+          <div className="flex items-center justify-center gap-2 mb-6">
+            {(["input", "quality", "subscribe"] as const).map((s, i) => {
+              const steps = ["input", "quality", "subscribe"];
+              const currentIdx = steps.indexOf(step);
+              const thisIdx = steps.indexOf(s);
+              const active = currentIdx >= thisIdx;
+              return (
+                <div key={s} className="flex items-center gap-2">
                   <div
-                    className="w-8 h-0.5 rounded-full transition-all duration-300"
-                    style={{ backgroundColor: currentIdx > thisIdx ? btnColor : secondaryBg }}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
+                    className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold transition-all duration-300"
+                    style={{
+                      backgroundColor: active ? btnColor : secondaryBg,
+                      color: active ? btnTextColor : hintColor,
+                    }}
+                  >
+                    {i + 1}
+                  </div>
+                  {i < 2 && (
+                    <div
+                      className="w-8 h-0.5 rounded-full transition-all duration-300"
+                      style={{ backgroundColor: currentIdx > thisIdx ? btnColor : secondaryBg }}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* Step: Input URL */}
         {step === "input" && (
@@ -381,12 +411,14 @@ export default function Index() {
                 <Icon name="Loader" size={24} className="animate-spin" style={{ color: btnColor }} />
               </div>
               <div>
-                <p className="font-medium">Подготавливаем файл...</p>
-                <p className="text-sm mt-1" style={{ color: hintColor }}>{selectedQuality} · {progress}%</p>
+                <p className="font-medium">Скачиваю видео...</p>
+                <p className="text-sm mt-1" style={{ color: hintColor }}>
+                  {chatId ? "Отправлю в чат когда будет готово" : "Подождите, обрабатываю..."}
+                </p>
               </div>
               <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: bgColor }}>
                 <div
-                  className="h-full rounded-full transition-all duration-300"
+                  className="h-full rounded-full transition-all duration-500"
                   style={{ width: `${progress}%`, backgroundColor: btnColor }}
                 />
               </div>
@@ -407,24 +439,40 @@ export default function Index() {
               <div>
                 <p className="font-semibold text-lg">Готово!</p>
                 <p className="text-sm mt-1" style={{ color: hintColor }}>
-                  Файл будет отправлен в чат с ботом
+                  {chatId ? "Видео отправлено в чат с ботом" : "Файл готов"}
                 </p>
               </div>
-              {downloadUrl && (
-                <a
-                  href={downloadUrl}
-                  className="block w-full py-3 rounded-xl text-sm font-semibold transition-all active:scale-[0.98]"
-                  style={{ backgroundColor: btnColor, color: btnTextColor }}
-                >
-                  Скачать файл
-                </a>
-              )}
               <button
                 onClick={handleReset}
                 className="w-full py-3 rounded-xl text-sm font-medium transition-all active:scale-[0.98]"
-                style={{ backgroundColor: bgColor, color: hintColor }}
+                style={{ backgroundColor: btnColor, color: btnTextColor }}
               >
                 Скачать ещё
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step: Error */}
+        {step === "error" && (
+          <div className="animate-fade-in">
+            <div className="rounded-2xl p-6 text-center space-y-4" style={{ backgroundColor: secondaryBg }}>
+              <div
+                className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mx-auto"
+                style={{ backgroundColor: "#ff3c3c20" }}
+              >
+                <Icon name="AlertCircle" size={24} style={{ color: "#ff3c3c" }} />
+              </div>
+              <div>
+                <p className="font-semibold">Ошибка</p>
+                <p className="text-sm mt-1" style={{ color: hintColor }}>{errorMsg}</p>
+              </div>
+              <button
+                onClick={handleReset}
+                className="w-full py-3 rounded-xl text-sm font-medium transition-all active:scale-[0.98]"
+                style={{ backgroundColor: btnColor, color: btnTextColor }}
+              >
+                Попробовать снова
               </button>
             </div>
           </div>

@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import hashlib
 import boto3
+import urllib.request
 
 CORS = {
     'Access-Control-Allow-Origin': '*',
@@ -56,20 +57,74 @@ def upload_to_s3(file_path: str, s3_key: str, content_type: str, filename: str) 
     return f"https://cdn.poehali.dev/projects/{access_key}/bucket/{s3_key}"
 
 
+def send_to_telegram(chat_id: str, cdn_url: str, filename: str, title: str, is_audio: bool):
+    """Отправляет файл пользователю через Telegram Bot API."""
+    token = os.environ['TELEGRAM_BOT_TOKEN']
+    base = f"https://api.telegram.org/bot{token}"
+
+    if is_audio:
+        method = "sendAudio"
+        payload = {
+            "chat_id": chat_id,
+            "audio": cdn_url,
+            "title": title,
+            "caption": f"🎵 {title}",
+        }
+    else:
+        method = "sendVideo"
+        payload = {
+            "chat_id": chat_id,
+            "video": cdn_url,
+            "caption": f"🎬 {title}",
+            "supports_streaming": True,
+        }
+
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(
+        f"{base}/{method}",
+        data=data,
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return json.loads(resp.read())
+
+
+def notify_telegram(chat_id: str, text: str):
+    """Отправляет текстовое сообщение пользователю."""
+    token = os.environ['TELEGRAM_BOT_TOKEN']
+    payload = {"chat_id": chat_id, "text": text}
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        data=data,
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read())
+
+
 def handler(event: dict, context) -> dict:
-    """Скачивает YouTube видео по ссылке и возвращает CDN URL для скачивания."""
+    """Скачивает YouTube видео и отправляет файл пользователю в Telegram."""
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS, 'body': ''}
 
     body = json.loads(event.get('body') or '{}')
     video_url = (body.get('url') or '').strip()
     quality = body.get('quality') or '1080p'
+    chat_id = str(body.get('chat_id') or '').strip()
 
     if not video_url:
         return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'URL обязателен'})}
 
+    if not chat_id:
+        return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'chat_id обязателен'})}
+
+    if chat_id != 'test':
+        notify_telegram(chat_id, "⏳ Скачиваю видео, подожди немного...")
+
     ytdlp = ensure_ytdlp()
     fmt, ext = get_format_and_ext(quality)
+    is_audio = quality == 'audio'
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         output_path = os.path.join(tmp_dir, 'video.%(ext)s')
@@ -88,6 +143,8 @@ def handler(event: dict, context) -> dict:
         )
 
         if dl_result.returncode != 0:
+            if chat_id != 'test':
+                notify_telegram(chat_id, "❌ Не удалось скачать видео. Проверь ссылку и попробуй снова.")
             return {
                 'statusCode': 422,
                 'headers': CORS,
@@ -109,6 +166,9 @@ def handler(event: dict, context) -> dict:
         filename = f'{safe_title}.{file_ext}'
 
         cdn_url = upload_to_s3(actual_file, s3_key, content_type, filename)
+
+    if chat_id != 'test':
+        send_to_telegram(chat_id, cdn_url, filename, title, is_audio)
 
     return {
         'statusCode': 200,

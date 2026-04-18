@@ -10,9 +10,18 @@
       "name": "Missing URL returns 400",
       "method": "POST",
       "path": "/",
-      "body": {},
+      "body": {"chat_id": "test"},
       "expectedStatus": 400,
       "expectedBody": {"error": "URL обязателен"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Missing chat_id returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"url": "https://youtube.com/watch?v=test"},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "chat_id обязателен"},
       "bodyMatcher": "partial"
     }
   ]
