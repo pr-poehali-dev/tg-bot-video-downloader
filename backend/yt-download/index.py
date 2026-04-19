@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import hashlib
 import boto3
@@ -25,16 +26,9 @@ def get_format_and_ext(quality: str) -> tuple[str, str]:
     return formats.get(quality, formats['1080p'])
 
 
-def ensure_ytdlp() -> str:
-    """Скачивает yt-dlp в /tmp если ещё нет."""
-    bin_path = '/tmp/yt-dlp'
-    if not os.path.exists(bin_path):
-        subprocess.run(
-            ['curl', '-fL', 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp', '-o', bin_path],
-            check=True, timeout=60
-        )
-        os.chmod(bin_path, 0o755)
-    return bin_path
+def get_ytdlp_cmd() -> list[str]:
+    """Возвращает команду для запуска yt-dlp."""
+    return [sys.executable, '-m', 'yt_dlp']
 
 
 def upload_to_s3(file_path: str, s3_key: str, content_type: str, filename: str) -> str:
@@ -58,7 +52,7 @@ def upload_to_s3(file_path: str, s3_key: str, content_type: str, filename: str) 
 
 
 def send_to_telegram(chat_id: str, cdn_url: str, filename: str, title: str, is_audio: bool):
-    """Отправляет файл пользователю через Telegram Bot API. v3"""
+    """Отправляет файл пользователю через Telegram Bot API."""
     token = os.environ['TELEGRAM_BOT_TOKEN']
     base = f"https://api.telegram.org/bot{token}"
 
@@ -104,7 +98,7 @@ def notify_telegram(chat_id: str, text: str):
 
 
 def handler(event: dict, context) -> dict:
-    """Скачивает YouTube видео и отправляет файл пользователю в Telegram."""
+    """Скачивает видео по ссылке и отправляет файл пользователю в Telegram."""
     if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': CORS, 'body': ''}
 
@@ -122,7 +116,7 @@ def handler(event: dict, context) -> dict:
     if chat_id != 'test':
         notify_telegram(chat_id, "⏳ Скачиваю видео, подожди немного...")
 
-    ytdlp = ensure_ytdlp()
+    ytdlp_cmd = get_ytdlp_cmd()
     fmt, ext = get_format_and_ext(quality)
     is_audio = quality == 'audio'
 
@@ -130,14 +124,14 @@ def handler(event: dict, context) -> dict:
         output_path = os.path.join(tmp_dir, 'video.%(ext)s')
 
         title_result = subprocess.run(
-            [ytdlp, '--get-title', '--no-playlist', video_url],
+            [*ytdlp_cmd, '--get-title', '--no-playlist', video_url],
             capture_output=True, text=True, timeout=30
         )
         title = title_result.stdout.strip() or 'video'
         safe_title = ''.join(c for c in title if c.isalnum() or c in ' _-').strip()[:80] or 'video'
 
         dl_result = subprocess.run(
-            [ytdlp, '--format', fmt, '--merge-output-format', ext,
+            [*ytdlp_cmd, '--format', fmt, '--merge-output-format', ext,
              '--output', output_path, '--no-playlist', '--max-filesize', '500m', video_url],
             capture_output=True, timeout=300
         )
